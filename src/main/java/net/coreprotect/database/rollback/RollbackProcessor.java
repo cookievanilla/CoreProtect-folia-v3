@@ -25,11 +25,13 @@ import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
+import net.coreprotect.CoreProtect;
 import net.coreprotect.bukkit.BukkitAdapter;
 import net.coreprotect.config.Config;
 import net.coreprotect.config.ConfigHandler;
 import net.coreprotect.database.logger.ItemLogger;
 import net.coreprotect.model.BlockGroup;
+import net.coreprotect.thread.Scheduler;
 import net.coreprotect.utility.BlockUtils;
 import net.coreprotect.utility.ItemUtils;
 import net.coreprotect.utility.MaterialUtils;
@@ -40,7 +42,7 @@ public class RollbackProcessor {
 
     /**
      * Process data for a specific chunk
-     * 
+     *
      * @param finalChunkX
      *            The chunk X coordinate
      * @param finalChunkZ
@@ -182,7 +184,7 @@ public class RollbackProcessor {
                     }
 
                     Block block = bukkitWorld.getBlockAt(rowX, rowY, rowZ);
-                    if (!bukkitWorld.isChunkLoaded(block.getChunk())) {
+                    if (!ConfigHandler.isFolia && !bukkitWorld.isChunkLoaded(block.getChunk())) {
                         bukkitWorld.getChunkAt(block.getLocation());
                     }
 
@@ -346,7 +348,7 @@ public class RollbackProcessor {
                                 continue;
                             }
                             Block block = bukkitWorld.getBlockAt(rowX, rowY, rowZ);
-                            if (!bukkitWorld.isChunkLoaded(block.getChunk())) {
+                            if (!ConfigHandler.isFolia && !bukkitWorld.isChunkLoaded(block.getChunk())) {
                                 bukkitWorld.getChunkAt(block.getLocation());
                             }
 
@@ -424,14 +426,24 @@ public class RollbackProcessor {
 
             // Teleport players out of danger if they're within this chunk
             if (preview == 0) {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    Location playerLocation = player.getLocation();
-                    String playerWorld = playerLocation.getWorld().getName();
-                    int chunkX = playerLocation.getBlockX() >> 4;
-                    int chunkZ = playerLocation.getBlockZ() >> 4;
+                if (!ConfigHandler.isFolia) {
+                    for (Player player : Bukkit.getOnlinePlayers()) {
+                        Location playerLocation = player.getLocation();
+                        String playerWorld = playerLocation.getWorld().getName();
+                        int chunkX = playerLocation.getBlockX() >> 4;
+                        int chunkZ = playerLocation.getBlockZ() >> 4;
 
-                    if (bukkitRollbackWorld.getName().equals(playerWorld) && chunkX == finalChunkX && chunkZ == finalChunkZ) {
-                        Teleport.performSafeTeleport(player, playerLocation, false);
+                        if (bukkitRollbackWorld.getName().equals(playerWorld) && chunkX == finalChunkX && chunkZ == finalChunkZ) {
+                            Teleport.performSafeTeleport(player, playerLocation, false);
+                        }
+                    }
+                }
+                else {
+                    for (Entity entity : bukkitRollbackWorld.getChunkAt(finalChunkX, finalChunkZ).getEntities()) {
+                        if (entity instanceof Player) {
+                            Player player = (Player) entity;
+                            Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> Teleport.performSafeTeleport(player, player.getLocation(), false), player, 0);
+                        }
                     }
                 }
             }

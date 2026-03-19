@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -37,6 +38,43 @@ import net.coreprotect.utility.DatabaseUtils;
 import net.coreprotect.utility.WorldUtils;
 
 public class Rollback extends RollbackUtil {
+
+    private static boolean processFoliaChunk(long chunkKey, int chunkX, int chunkZ, HashMap<Long, ArrayList<Object[]>> blockMap, HashMap<Long, ArrayList<Object[]>> itemMap, int rollbackType, int preview, String userString, Player user, World world, boolean inventoryRollback) {
+        ArrayList<Object[]> blockData = blockMap != null ? blockMap.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
+        ArrayList<Object[]> itemData = itemMap != null ? itemMap.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
+        if (blockData.isEmpty() && itemData.isEmpty()) {
+            return true;
+        }
+
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        world.getChunkAtAsync(chunkX, chunkZ, true).whenComplete((chunk, throwable) -> {
+            if (throwable != null || chunk == null) {
+                if (throwable != null) {
+                    throwable.printStackTrace();
+                }
+                future.complete(false);
+                return;
+            }
+
+            Location chunkLocation = new Location(world, (chunkX << 4), 0, (chunkZ << 4));
+            Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> {
+                try {
+                    future.complete(RollbackProcessor.processChunk(chunkX, chunkZ, chunkKey, blockData, itemData, rollbackType, preview, userString, user, world, inventoryRollback));
+                }
+                catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
+            }, chunkLocation, 0);
+        });
+
+        try {
+            return future.get();
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
 
     public static List<String[]> performRollbackRestore(Statement statement, CommandSender user, List<String> checkUuids, List<String> checkUsers, String timeString, List<Object> restrictList, Map<Object, Boolean> excludeList, List<String> excludeUserList, List<Integer> actionList, Location location, Integer[] radius, long startTime, long endTime, boolean restrictWorld, boolean lookup, boolean verbose, final int rollbackType, final int preview) {
         List<String[]> list = new ArrayList<>();
@@ -213,6 +251,7 @@ public class Rollback extends RollbackUtil {
             ConfigHandler.rollbackHash.put(userString, new int[] { 0, 0, 0, 0, 0 });
 
             final String finalUserString = userString;
+            boolean useFoliaPath = ConfigHandler.isFolia && !inventoryRollback;
             for (Entry<Long, Integer> entry : DatabaseUtils.entriesSortedByValues(chunkList)) {
                 chunkCount++;
 
@@ -247,51 +286,75 @@ public class Rollback extends RollbackUtil {
                 }
 
                 ConfigHandler.rollbackHash.put(finalUserString, new int[] { itemCount, blockCount, entityCount, 0, scannedWorldData });
-                for (Entry<Integer, World> rollbackWorlds : worldMap.entrySet()) {
-                    Integer rollbackWorldId = rollbackWorlds.getKey();
-                    World bukkitRollbackWorld = rollbackWorlds.getValue();
-                    Location chunkLocation = new Location(bukkitRollbackWorld, (finalChunkX << 4), 0, (finalChunkZ << 4));
-                    final HashMap<Long, ArrayList<Object[]>> finalBlockList = dataList.get(rollbackWorldId);
-                    final HashMap<Long, ArrayList<Object[]>> finalItemList = itemDataList.get(rollbackWorldId);
 
-                    Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> {
-                        // Process this chunk using our new RollbackProcessor class
-                        ArrayList<Object[]> blockData = finalBlockList != null ? finalBlockList.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
-                        ArrayList<Object[]> itemData = finalItemList != null ? finalItemList.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
-                        RollbackProcessor.processChunk(finalChunkX, finalChunkZ, chunkKey, blockData, itemData, rollbackType, preview, finalUserString, finalUser instanceof Player ? (Player) finalUser : null, bukkitRollbackWorld, inventoryRollback);
-                    }, chunkLocation, 0);
-                }
+                if (useFoliaPath) {
+                    boolean abort = false;
 
-                rollbackHashData = ConfigHandler.rollbackHash.get(finalUserString);
-                int next = rollbackHashData[3];
-                int scannedWorlds = rollbackHashData[4];
-                int sleepTime = 0;
-                int abort = 0;
+                    for (Entry<Integer, World> rollbackWorlds : worldMap.entrySet()) {
+                        Integer rollbackWorldId = rollbackWorlds.getKey();
+                        World bukkitRollbackWorld = rollbackWorlds.getValue();
+                        HashMap<Long, ArrayList<Object[]>> finalBlockList = dataList.get(rollbackWorldId);
+                        HashMap<Long, ArrayList<Object[]>> finalItemList = itemDataList.get(rollbackWorldId);
 
-                while (next == 0 || scannedWorlds < worldMap.size()) {
-                    if (preview == 1) {
-                        // Not actually changing blocks, so less intensive.
-                        sleepTime = sleepTime + 1;
-                        Thread.sleep(1);
-                    }
-                    else {
-                        sleepTime = sleepTime + 5;
-                        Thread.sleep(5);
+                        boolean success = processFoliaChunk(chunkKey, finalChunkX, finalChunkZ, finalBlockList, finalItemList, rollbackType, preview, finalUserString, finalUser instanceof Player ? (Player) finalUser : null, bukkitRollbackWorld, inventoryRollback);
+                        if (!success) {
+                            Chat.console(Phrase.build(Phrase.ROLLBACK_ABORTED));
+                            abort = true;
+                            break;
+                        }
                     }
 
-                    rollbackHashData = ConfigHandler.rollbackHash.get(finalUserString);
-                    next = rollbackHashData[3];
-                    scannedWorlds = rollbackHashData[4];
-
-                    if (sleepTime > 300000) {
-                        abort = 1;
+                    if (abort) {
                         break;
                     }
                 }
+                else {
+                    for (Entry<Integer, World> rollbackWorlds : worldMap.entrySet()) {
+                        Integer rollbackWorldId = rollbackWorlds.getKey();
+                        World bukkitRollbackWorld = rollbackWorlds.getValue();
+                        Location chunkLocation = new Location(bukkitRollbackWorld, (finalChunkX << 4), 0, (finalChunkZ << 4));
+                        final HashMap<Long, ArrayList<Object[]>> finalBlockList = dataList.get(rollbackWorldId);
+                        final HashMap<Long, ArrayList<Object[]>> finalItemList = itemDataList.get(rollbackWorldId);
 
-                if (abort == 1 || next == 2) {
-                    Chat.console(Phrase.build(Phrase.ROLLBACK_ABORTED));
-                    break;
+                        Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> {
+                            // Process this chunk using our new RollbackProcessor class
+                            ArrayList<Object[]> blockData = finalBlockList != null ? finalBlockList.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
+                            ArrayList<Object[]> itemData = finalItemList != null ? finalItemList.getOrDefault(chunkKey, new ArrayList<>()) : new ArrayList<>();
+                            RollbackProcessor.processChunk(finalChunkX, finalChunkZ, chunkKey, blockData, itemData, rollbackType, preview, finalUserString, finalUser instanceof Player ? (Player) finalUser : null, bukkitRollbackWorld, inventoryRollback);
+                        }, chunkLocation, 0);
+                    }
+
+                    rollbackHashData = ConfigHandler.rollbackHash.get(finalUserString);
+                    int next = rollbackHashData[3];
+                    int scannedWorlds = rollbackHashData[4];
+                    int sleepTime = 0;
+                    int abort = 0;
+
+                    while (next == 0 || scannedWorlds < worldMap.size()) {
+                        if (preview == 1) {
+                            // Not actually changing blocks, so less intensive.
+                            sleepTime = sleepTime + 1;
+                            Thread.sleep(1);
+                        }
+                        else {
+                            sleepTime = sleepTime + 5;
+                            Thread.sleep(5);
+                        }
+
+                        rollbackHashData = ConfigHandler.rollbackHash.get(finalUserString);
+                        next = rollbackHashData[3];
+                        scannedWorlds = rollbackHashData[4];
+
+                        if (sleepTime > 300000) {
+                            abort = 1;
+                            break;
+                        }
+                    }
+
+                    if (abort == 1 || next == 2) {
+                        Chat.console(Phrase.build(Phrase.ROLLBACK_ABORTED));
+                        break;
+                    }
                 }
 
                 rollbackHashData = ConfigHandler.rollbackHash.get(finalUserString);

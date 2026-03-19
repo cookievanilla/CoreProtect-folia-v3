@@ -61,7 +61,7 @@ public class RollbackEntityHandler {
                 }
 
                 Block block = bukkitWorld.getBlockAt(rowX, rowY, rowZ);
-                if (!bukkitWorld.isChunkLoaded(block.getChunk())) {
+                if (!ConfigHandler.isFolia && !bukkitWorld.isChunkLoaded(block.getChunk())) {
                     bukkitWorld.getChunkAt(block.getLocation());
                 }
 
@@ -122,7 +122,7 @@ public class RollbackEntityHandler {
                             }
                         }
 
-                        if (!removed && entityId > -1) {
+                        if (!removed && entityId > -1 && !ConfigHandler.isFolia) {
                             for (Entity entity : block.getWorld().getLivingEntities()) {
                                 int id = entity.getEntityId();
                                 if (id == entityId) {
@@ -184,7 +184,7 @@ public class RollbackEntityHandler {
 
     /**
      * Spawns an entity at the given block location.
-     * 
+     *
      * @param user
      *            The username of the player
      * @param block
