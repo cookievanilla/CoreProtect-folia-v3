@@ -442,7 +442,20 @@ public class RollbackProcessor {
                     for (Entity entity : bukkitRollbackWorld.getChunkAt(finalChunkX, finalChunkZ).getEntities()) {
                         if (entity instanceof Player) {
                             Player player = (Player) entity;
-                            Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> Teleport.performSafeTeleport(player, player.getLocation(), false), player, 0);
+                            String playerWorld = player.getWorld().getName();
+                            int playerChunkX = player.getLocation().getBlockX() >> 4;
+                            int playerChunkZ = player.getLocation().getBlockZ() >> 4;
+
+                            Scheduler.scheduleSyncDelayedTask(CoreProtect.getInstance(), () -> {
+                                Location playerLocation = player.getLocation();
+                                String currentWorld = playerLocation.getWorld().getName();
+                                int currentChunkX = playerLocation.getBlockX() >> 4;
+                                int currentChunkZ = playerLocation.getBlockZ() >> 4;
+
+                                if (playerWorld.equals(currentWorld) && playerChunkX == currentChunkX && playerChunkZ == currentChunkZ) {
+                                    Teleport.performSafeTeleport(player, playerLocation, false);
+                                }
+                            }, player, 0);
                         }
                     }
                 }

@@ -57,6 +57,7 @@ public class TeleportCommand {
         if (wid > -1) {
             world = Bukkit.getServer().getWorld(WorldUtils.getWorldName(wid));
             if (world == null) {
+                Chat.sendMessage(player, new ChatMessage(Phrase.build(Phrase.WORLD_NOT_FOUND, worldName)).build());
                 return;
             }
         }
