@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -68,7 +70,10 @@ public class Rollback extends RollbackUtil {
         });
 
         try {
-            return future.get();
+            return future.get(300, TimeUnit.SECONDS);
+        }
+        catch (TimeoutException e) {
+            return false;
         }
         catch (Exception e) {
             e.printStackTrace();
